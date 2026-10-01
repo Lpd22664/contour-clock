@@ -1,0 +1,20 @@
+# Merge into your Noctalia configuration; adjust the output and logical size.
+# If widget_order already exists, add "contour-clock" to its existing list.
+[desktop_widgets]
+enabled = true
+schema_version = 2
+widget_order = ["contour-clock"]
+
+[desktop_widgets.widget.contour-clock]
+type = "acm/contour-clock:clock"
+output = "DP-1"
+cx = 960.0
+cy = 200.0
+box_width = 1100.0
+box_height = 240.0
+placement_width = 1920.0
+placement_height = 1080.0
+rotation = 0.0
+
+[desktop_widgets.widget.contour-clock.settings]
+background = false

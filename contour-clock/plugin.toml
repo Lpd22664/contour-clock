@@ -1,0 +1,20 @@
+id = "acm/contour-clock"
+name = "Contour Clock"
+version = "1.1.2"
+plugin_api = 26
+author = "acm"
+license = "MIT"
+icon = "clock"
+description = "Capsule-free adaptive desktop time and date."
+dependencies = ["python3", "magick"]
+tags = ["clock", "desktop", "wallpaper"]
+
+[[setting]]
+key = "output"
+type = "string"
+label_key = "settings.output"
+default = "eDP-1"
+
+[[desktop_widget]]
+id = "clock"
+entry = "clock.luau"
