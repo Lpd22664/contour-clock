@@ -64,8 +64,9 @@ def mix(color, neutral, amount):
     return tuple(round(c * (1 - amount) + neutral * amount) for c in color)
 
 
-def treatment(values, palette=None, target=4.5):
-    values = sorted(values)
+def treatments(regions, palette=None):
+    """Choose one accent tone against every label's own contrast target."""
+    regions = {name: (sorted(values), target) for name, (values, target) in regions.items()}
     palette = palette or {}
     try:
         accent = rgb(palette.get("primary"))
@@ -73,34 +74,44 @@ def treatment(values, palette=None, target=4.5):
     except (ValueError, TypeError):
         accent = (128, 128, 128)
         source = "neutral-fallback"
-    def quality(rgb):
-        ratios = sorted(contrast(luminance(rgb), value) for value in values)
-        return ratios[len(ratios) // 10], ratios[len(ratios) // 5]
+    def quality(color):
+        lum = luminance(color)
+        result = {}
+        for name, (values, target) in regions.items():
+            ratios = sorted(contrast(lum, value) for value in values)
+            result[name] = (ratios[len(ratios) // 10], ratios[len(ratios) // 5])
+        score = min(result[name][0] / target for name, (_, target) in regions.items())
+        return score, result
     candidates = []
     for step in range(39):
         amount = step / 40
         for neutral in (0, 255):
             color = mix(accent, neutral, amount)
-            p10, p20 = quality(color)
-            candidates.append((amount, color, p10, p20))
-    passing = [c for c in candidates if c[2] >= target]
-    outlined = not passing or values[len(values) * 9 // 10] - values[len(values) // 10] > .55
+            score, ratios = quality(color)
+            candidates.append((amount, color, score, ratios))
+    passing = [c for c in candidates if c[2] >= 1]
     if passing:
         # Keep the native accent unchanged whenever it already reads clearly.
-        amount, color, p10, p20 = min(passing, key=lambda c: (c[0], -c[2]))
+        amount, color, score, ratios = min(passing, key=lambda c: (c[0], -c[2]))
     else:
-        # Split light/dark scenery needs two-tone glyphs. Preserve some accent
-        # chroma in the fill; an opposing tinted edge protects the other areas.
+        # Mixed scenery may make both targets impossible with a single fill.
+        # Balance the weaker label while retaining the existing accent family;
+        # do not chase contrast into pure black/white or add a glyph border.
         strong = [c for c in candidates if c[0] <= .8]
-        amount, color, p10, p20 = max(strong, key=lambda c: (c[2], -c[0]))
+        amount, color, score, ratios = max(strong, key=lambda c: (c[2], -c[0]))
     bright = luminance(color) > .179
-    edge = mix(accent, 0 if bright else 255, .85)
-    return {"color": hex_rgb(color), "light": bright, "source": source,
-            "tone_adjustment": amount, "contrast_target": target,
-            "contrast_p10": round(p10, 3), "contrast_p20": round(p20, 3),
-            "outline": outlined, "outline_color": hex_rgb(edge),
-            "shadow_color": hex_rgb(mix(accent, 0, .8)),
-            "variation": statistics.pstdev(values)}
+    return {name: {"color": hex_rgb(color), "light": bright, "source": source,
+                   "tone_adjustment": amount, "contrast_target": target,
+                   "contrast_p10": round(ratios[name][0], 3),
+                   "contrast_p20": round(ratios[name][1], 3),
+                   "contrast_met": ratios[name][0] >= target, "outline": False,
+                   "shadow_color": hex_rgb(mix(accent, 0, .8)),
+                   "variation": statistics.pstdev(values)}
+            for name, (values, target) in regions.items()}
+
+
+def treatment(values, palette=None, target=4.5):
+    return treatments({"text": (values, target)}, palette)["text"]
 
 
 def sample_wallpaper(wallpaper, width, height, cache, pinned=False):
@@ -136,8 +147,8 @@ def analyse(wallpaper, width, height, cache, pinned=False, palette=None):
     sampled = sample_wallpaper(wallpaper, width, height, cache, pinned)
     candidates = []
     for sample in sampled["samples"]:
-        time = treatment(sample["time"], palette, target=3)
-        date = treatment(sample["date"], palette, target=4.5)
+        styles = treatments({"time": (sample["time"], 3), "date": (sample["date"], 4.5)}, palette)
+        time, date = styles["time"], styles["date"]
         score = min(time["contrast_p20"] / 3, date["contrast_p20"] / 4.5)
         score -= (time["variation"] + date["variation"]) * .4
         score -= abs(sample["offset"]) * 3
@@ -190,27 +201,14 @@ def wallpaper_palette(wallpaper, cache, scheme, mode):
 
 
 def text_image(text, size, style, destination, scale, is_time=False):
-    stroke = style.get("outline_color", "#101a20" if style["light"] else "#f8fbfd")
-    use_morph_outline = style["outline"]
-    outline_radius = max(1, round(.85 * scale))
-    padding = outline_radius + 2
-    args = ["-background", "none", "-font", "Adwaita-Sans-Medium" if is_time or style["outline"] else FONT, "-pointsize", str(size * scale),
+    args = ["-background", "none", "-font", "Adwaita-Sans-Medium" if is_time else FONT, "-pointsize", str(size * scale),
             "-kerning", str(1.5 * scale if is_time else 0),
             "-fill", style["color"], "-stroke", "none", "-strokewidth", "0", "label:" + text,
             "-trim", "+repage"]
-    if use_morph_outline:
-        # Build the border from a dilated copy of the glyph alpha. This follows
-        # every contour evenly, including the large numerals, and cannot be
-        # clipped by ImageMagick's label box.
-        args += ["-bordercolor", "none", "-border", f"{padding}x{padding}"]
-        args += ["(", "+clone", "-channel", "A", "-morphology", "Dilate",
-                 f"Disk:{outline_radius}", "+channel", "-fill", stroke,
-                 "-colorize", "100", ")", "+swap", "-composite"]
-    if not use_morph_outline:
-        # Font-shaped shadow creates restrained depth, not a translucent background.
-        shadow = f"{38 if is_time else 28}x{4.5 * scale if is_time else .7 * scale}+0+{round(3 * scale) if is_time else round(scale)}"
-        args += ["(", "+clone", "-background", style.get("shadow_color", "#171717"), "-shadow", shadow, ")",
-                 "+swap", "-background", "none", "-layers", "merge", "+repage"]
+    # Always use the existing soft shadow: a uniform fill with no glyph outline.
+    shadow = f"{38 if is_time else 28}x{4.5 * scale if is_time else .7 * scale}+0+{round(3 * scale) if is_time else round(scale)}"
+    args += ["(", "+clone", "-background", style.get("shadow_color", "#171717"), "-shadow", shadow, ")",
+             "+swap", "-background", "none", "-layers", "merge", "+repage"]
     args.append(str(destination))
     magick(args)
 
@@ -236,8 +234,8 @@ def render(args):
         analysis = analyse(args.wallpaper, width, height, args.cache, args.pinned, palette)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         analysis = {"center_x": width / 2, "wallpaper": args.wallpaper,
-                    "warning": str(error), "time": treatment([.01, .9], palette),
-                    "date": treatment([.01, .9], palette)}
+                    "warning": str(error),
+                    **treatments({"time": ([.01, .9], 3), "date": ([.01, .9], 4.5)}, palette)}
     analysis["palette_source"] = palette_source
     analysis["palette_scheme"] = args.scheme
     analysis["palette_mode"] = args.theme_mode

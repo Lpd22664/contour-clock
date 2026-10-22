@@ -1,7 +1,7 @@
 # Contour Clock
 
 A custom desktop clock for **Noctalia v5 on Linux**. Large rounded time lettering,
-a small freestanding date, and wallpaper-aware colours and glyph outlines.
+a small freestanding date, and a shared wallpaper-aware colour with soft shadows.
 The clock stays at the top centre while its colour adapts to your wallpaper.
 
 ## Requirements
@@ -104,7 +104,11 @@ only six generated clock frames are retained.
 
 Newer Noctalia hosts supply their active palette directly. On older hosts the
 helper uses `noctalia theme` for wallpaper-based palettes; custom palette matching
-requires the newer colour API. Invalid wallpapers fall back to outlined lettering.
+requires the newer colour API. Date and time choose one accent tone together,
+keeping the native palette colour whenever it is readable in both regions.
+Mixed backgrounds use the best shared tone within the accent family and retain
+soft shadows; no glyph borders are drawn. Sampled contrast targets may remain
+unmet on mixed scenery. Invalid wallpapers also use one shared, shadowed fill.
 All runtime caches stay in Noctalia's plugin data directory.
 
 No wallpapers, private configuration, generated desktop screenshots, or fonts are
